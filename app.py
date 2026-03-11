@@ -36,6 +36,8 @@ st.info("""
 **What is this?** This is an AI Assistant designed to help you quickly find information within long policy manuals. 
 Instead of searching through hundreds of pages, you can upload a document and simply ask questions to get instant answers.
 \nFor example documents like SNAP, Medicaid, Health Insurance, Housing and Immigration policies work best, but feel free to try any PDF!
+
+\n**Note:** This assistant can also understand and explain complex **tables, images, and flowcharts** that are often found in these technical documents.
 """)
 
 with st.expander("📖 How to use this assistant"):
