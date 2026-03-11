@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+build/
+dist/
+
+# Environment and Secrets
+.env
+.env.local
+.env.*
+.aws/
+.streamlit/
+
+# RAG Data (Keep raw data out of Git)
+data/
+docs/*.pdf
+docs/*.docx
+docs/*.txt
+*.csv
+
+# IDEs
+.vscode/
+.idea/
+
+# Logs
+*.log
