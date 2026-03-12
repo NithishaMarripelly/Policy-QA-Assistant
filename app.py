@@ -113,7 +113,7 @@ with st.sidebar:
                     Key=metadata_path, 
                     Body=json.dumps(metadata_content)
                 )
-                st.success(f"Uploaded {uploaded_file.name} to S3!")
+                st.success(f"Pdf Uploaded {uploaded_file.name} Successfully!")
                 
                 # 2. Start Ingestion Job
                 with st.spinner("🔄 Assistant is reading the document..."):
@@ -161,7 +161,7 @@ if prompt := st.chat_input("Ask a question about policy..."):
 
     with st.chat_message("assistant"):
         try:
-            # Retrieval with strict Session ID filtering
+            # 1. Retrieval with strict Session ID filtering
             response = bedrock_agent_runtime.retrieve_and_generate(
                 input={'text': prompt},
                 retrieveAndGenerateConfiguration={
@@ -182,8 +182,23 @@ if prompt := st.chat_input("Ask a question about policy..."):
                     }
                 }
             )
+            
+            # 2. Extract and display the generated answer
             answer = response['output']['text']
             st.markdown(answer)
+
+            # 3. Extract and Display Citations (Top-K Chunks)
+            if "citations" in response and response["citations"]:
+                with st.expander("📚 View Source Chunks (Top-K)"):
+                    chunk_count = 1
+                    for citation in response["citations"]:
+                        for reference in citation.get("retrievedReferences", []):
+                            source_text = reference["content"]["text"]
+                            st.info(f"**Source Chunk {chunk_count}:**\n\n{source_text}")
+                            st.divider()
+                            chunk_count += 1
+            
             st.session_state.messages.append({"role": "assistant", "content": answer})
+            
         except Exception as e:
             st.error(f"An error occurred: {e}")
