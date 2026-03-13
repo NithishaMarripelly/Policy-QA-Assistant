@@ -4,8 +4,51 @@ import time
 import uuid
 import json
 
+# --- 0. CUSTOM CSS FOR CHUNKS ---
+st.markdown("""
+    <style>
+    /* 1. Target the Info Box specifically by its test-id */
+    [data-testid="stInfo"] {
+        background-color: #1e293b !important; /* Professional dark blue background */
+        border: 1px solid #334155 !important;
+        border-radius: 8px !important;
+        padding: 15px !important;
+    }
+
+    /* 2. Force a clean, small font size on EVERY element inside the box */
+    [data-testid="stInfo"] *,
+    [data-testid="stInfo"] p,
+    [data-testid="stInfo"] div,
+    [data-testid="stInfo"] span {
+        font-size: 12px !important;  /* Reduced from 14px to 12px */
+        font-family: 'Inter', 'Source Sans Pro', sans-serif !important;
+        line-height: 1.4 !important;
+        color: #e2e8f0 !important; /* Soft white/grey for better readability */
+        font-weight: normal !important;
+        font-style: normal !important;
+    }
+
+    /* 3. Specifically fix the bold headers so they still stand out a little */
+    [data-testid="stInfo"] strong, 
+    [data-testid="stInfo"] b {
+        font-size: 13px !important;  /* Slightly larger for headers */
+        font-weight: 700 !important;
+        color: #38bdf8 !important; /* Light blue for headings */
+    }
+
+    /* 4. Fix the expander header font weight */
+    .st-ae {
+        font-weight: 500;
+    }
+    
+    /* 5. Target markdown content specifically */
+    [data-testid="stInfo"] [data-testid="stMarkdownContainer"] {
+        font-size: 12px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 # --- 1. SESSION INITIALIZATION ---
-# Unique ID for isolation and targeted automatic cleanup
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
 
@@ -35,35 +78,26 @@ bedrock_agent_runtime = session.client('bedrock-agent-runtime')
 
 # --- 3. AUTOMATIC SESSION CLEANUP LOGIC ---
 def auto_cleanup_callback(session_id_to_clean):
-    """
-    Triggers automatically when Streamlit releases the session resource 
-    (usually 2-3 minutes after the browser tab is closed).
-    """
     try:
-        # Re-initialize client for the background callback
         s3 = boto3.client(
             's3',
             aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
             aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],
             region_name=st.secrets.get("AWS_DEFAULT_REGION", "us-east-1")
         )
-        
-        # Delete only files belonging to THIS session ID
         prefix = f"input-docs/{session_id_to_clean}"
         objects = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
         
         if 'Contents' in objects:
             delete_keys = [{'Key': obj['Key']} for obj in objects['Contents']]
             s3.delete_objects(Bucket=S3_BUCKET, Delete={'Objects': delete_keys})
-            
     except Exception:
-        pass # Silent fail for background cleanup
+        pass 
 
 @st.cache_resource(on_release=auto_cleanup_callback, scope="session")
 def register_session_cleanup(session_id):
     return session_id
 
-# Activate the background tracker
 register_session_cleanup(st.session_state.session_id)
 
 # --- 4. MAIN UI SETUP ---
@@ -73,9 +107,9 @@ st.title("📂 Policy Q&A Assistant")
 st.info("""
 **What is this?** This is an AI Assistant designed to help you quickly find information within long policy manuals. 
 Instead of searching through hundreds of pages, you can upload a document and simply ask questions to get instant answers.
-\nFor example documents like SNAP, Medicaid, Health Insurance, Housing and Immigration policies work best, but feel free to try any PDF!
+\nFor example, documents like SNAP, Medicaid, Health Insurance, Housing, and Immigration policies work best.
 
-\n**Note:** This assistant can also understand and explain complex **tables, images, and flowcharts** that are often found in these technical documents.
+\n**Note:** This assistant can also understand and explain complex **tables, images, and flowcharts** found in these technical documents.
 """)
 
 with st.expander("📖 How to use this assistant"):
@@ -83,7 +117,7 @@ with st.expander("📖 How to use this assistant"):
     1. **Step 1: Upload** – Go to the sidebar on the left and drag in a policy PDF.
     2. **Step 2: Sync** – Click **'Upload & Sync'**. This allows the Assistant to read and learn the new information.
     3. **Step 3: Wait** – Watch the status bar. Once it says **'Ready'**, you can begin.
-    4. **Step 4: Ask** – Type your question in the chat box at the bottom (for example: *"Who is eligible for this program?"*).
+    4. **Step 4: Ask** – Type your question in the chat box at the bottom.
     """)
 
 # --- 5. SIDEBAR: Manage Documents ---
@@ -94,7 +128,6 @@ with st.sidebar:
     
     if st.button("Upload & Sync"):
         if uploaded_file:
-            # Filename includes session_id for targeted automatic cleanup
             file_key = f"{st.session_state.session_id}_{uploaded_file.name}"
             s3_path = f"input-docs/{file_key}"
             metadata_path = f"{s3_path}.metadata.json"
@@ -106,7 +139,6 @@ with st.sidebar:
             }
             
             try:
-                # 1. Upload PDF and Metadata
                 s3_client.upload_fileobj(uploaded_file, S3_BUCKET, s3_path)
                 s3_client.put_object(
                     Bucket=S3_BUCKET, 
@@ -115,7 +147,6 @@ with st.sidebar:
                 )
                 st.success(f"Pdf Uploaded {uploaded_file.name} Successfully!")
                 
-                # 2. Start Ingestion Job
                 with st.spinner("🔄 Assistant is reading the document..."):
                     response = bedrock_agent.start_ingestion_job(
                         knowledgeBaseId=KNOWLEDGE_BASE_ID,
@@ -123,7 +154,6 @@ with st.sidebar:
                     )
                     job_id = response['ingestionJob']['ingestionJobId']
 
-                    # 3. Poll for Completion
                     while True:
                         status_check = bedrock_agent.get_ingestion_job(
                             knowledgeBaseId=KNOWLEDGE_BASE_ID,
@@ -161,7 +191,7 @@ if prompt := st.chat_input("Ask a question about policy..."):
 
     with st.chat_message("assistant"):
         try:
-            # 1. Retrieval with strict Session ID filtering
+            # Retrieval with strict Session ID filtering
             response = bedrock_agent_runtime.retrieve_and_generate(
                 input={'text': prompt},
                 retrieveAndGenerateConfiguration={
@@ -183,22 +213,44 @@ if prompt := st.chat_input("Ask a question about policy..."):
                 }
             )
             
-            # 2. Extract and display the generated answer
+            # Display main answer
             answer = response['output']['text']
             st.markdown(answer)
 
-            # 3. Extract and Display Citations (Top-K Chunks)
+            # Display Citations (Top-K Chunks)
             if "citations" in response and response["citations"]:
                 with st.expander("📚 View Source Chunks (Top-K)"):
                     chunk_count = 1
                     for citation in response["citations"]:
+                        # NEW CODE - USE THIS:
                         for reference in citation.get("retrievedReferences", []):
                             source_text = reference["content"]["text"]
-                            st.info(f"**Source Chunk {chunk_count}:**\n\n{source_text}")
-                            st.divider()
+                            # Use HTML container with inline styles to force consistent sizing
+                            st.markdown(f"""
+                                <div style="
+                                    background-color: #1e293b;
+                                    border: 1px solid #334155;
+                                    border-radius: 8px;
+                                    padding: 15px;
+                                    margin-bottom: 10px;
+                                ">
+                                    <div style="
+                                        font-size: 13px;
+                                        font-weight: 700;
+                                        color: #38bdf8;
+                                        margin-bottom: 8px;
+                                    ">Source Chunk {chunk_count}:</div>
+                                    <div style="
+                                        font-size: 12px;
+                                        color: #e2e8f0;
+                                        line-height: 1.5;
+                                        font-family: 'Inter', 'Source Sans Pro', sans-serif;
+                                        white-space: pre-wrap;
+                                    ">{source_text}</div>
+                                </div>
+                            """, unsafe_allow_html=True)
                             chunk_count += 1
-            
+
             st.session_state.messages.append({"role": "assistant", "content": answer})
-            
         except Exception as e:
             st.error(f"An error occurred: {e}")
