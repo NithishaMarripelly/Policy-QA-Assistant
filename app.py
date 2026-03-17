@@ -6,12 +6,17 @@ import json
 import html
 import io
 import base64
-import fitz  # PyMuPDF for image extraction
+
+# Check if PyMuPDF is installed
+try:
+    import fitz  # PyMuPDF for image extraction
+    PYMUPDF_AVAILABLE = True
+except ImportError:
+    PYMUPDF_AVAILABLE = False
 
 # --- 0. CUSTOM CSS FOR CHUNKS & UI ---
 st.markdown("""
     <style>
-    /* Custom styling for chunk containers */
     .chunk-container {
         background-color: #1e293b;
         border: 1px solid #334155;
@@ -19,7 +24,6 @@ st.markdown("""
         padding: 15px;
         margin-bottom: 15px;
     }
-    
     .chunk-header {
         font-size: 13px;
         font-weight: 700;
@@ -27,7 +31,6 @@ st.markdown("""
         margin-bottom: 10px;
         font-family: 'Inter', sans-serif;
     }
-    
     .chunk-content {
         font-size: 12px;
         line-height: 1.6;
@@ -36,13 +39,9 @@ st.markdown("""
         white-space: pre-wrap;
         word-wrap: break-word;
     }
-    
-    /* Ensure expander content doesn't override */
     [data-testid="stExpander"] {
         background-color: transparent;
     }
-    
-    /* Progress bar styling */
     .stProgress > div > div > div > div {
         background-color: #38bdf8;
     }
@@ -76,15 +75,21 @@ session = boto3.Session(
 s3_client = session.client('s3')
 bedrock_agent = session.client('bedrock-agent')
 bedrock_agent_runtime = session.client('bedrock-agent-runtime')
-bedrock_runtime = session.client('bedrock-runtime')  # For vision API calls
+
+# Initialize bedrock_runtime client
+try:
+    bedrock_runtime = session.client('bedrock-runtime')
+    BEDROCK_RUNTIME_AVAILABLE = True
+except Exception:
+    BEDROCK_RUNTIME_AVAILABLE = False
 
 # --- 3. IMAGE EXTRACTION & DESCRIPTION FUNCTIONS ---
 
 def extract_images_from_pdf(pdf_bytes):
-    """
-    Extract images from PDF using PyMuPDF (fitz)
-    Returns: List of dicts with {page_num, image_index, image_bytes, image_format}
-    """
+    """Extract images from PDF using PyMuPDF (silent)"""
+    if not PYMUPDF_AVAILABLE:
+        return []
+    
     images = []
     
     try:
@@ -100,7 +105,7 @@ def extract_images_from_pdf(pdf_bytes):
                 image_bytes = base_image["image"]
                 image_ext = base_image["ext"]
                 
-                # Only process images larger than 10KB (filter out small icons/logos)
+                # Only process images larger than 10KB
                 if len(image_bytes) > 10000:
                     images.append({
                         "page_num": page_num + 1,
@@ -112,21 +117,18 @@ def extract_images_from_pdf(pdf_bytes):
         pdf_document.close()
         return images
         
-    except Exception as e:
-        st.warning(f"Error extracting images: {e}")
+    except Exception:
         return []
 
 
 def describe_image_with_bedrock(image_bytes, image_format, page_num):
-    """
-    Use Amazon Bedrock's Claude with vision to describe an image
-    Returns: String description of the image
-    """
+    """Use Amazon Bedrock's Claude with vision to describe an image (silent)"""
+    if not BEDROCK_RUNTIME_AVAILABLE:
+        return "[Bedrock Runtime client not initialized]"
+    
     try:
-        # Convert image bytes to base64
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        # Determine media type
         media_type_map = {
             "png": "image/png",
             "jpg": "image/jpeg",
@@ -136,7 +138,6 @@ def describe_image_with_bedrock(image_bytes, image_format, page_num):
         }
         media_type = media_type_map.get(image_format.lower(), "image/png")
         
-        # Prepare the request body for Bedrock
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 1024,
@@ -168,13 +169,11 @@ Be thorough but concise. Focus on searchable, factual content."""
             ]
         }
         
-        # Call Bedrock Runtime API with Claude 3.5 Sonnet
         response = bedrock_runtime.invoke_model(
             modelId='us.anthropic.claude-3-5-sonnet-20241022-v2:0',
             body=json.dumps(request_body)
         )
         
-        # Parse response
         response_body = json.loads(response['body'].read())
         description = response_body['content'][0]['text']
         
@@ -185,13 +184,10 @@ Be thorough but concise. Focus on searchable, factual content."""
 
 
 def create_image_description_file(image_descriptions):
-    """
-    Create a text file with all image descriptions for vector search
-    """
+    """Create a text file with all image descriptions (silent)"""
     text_content = "=== IMAGE DESCRIPTIONS FOR VECTOR SEARCH ===\n\n"
     text_content += "This document contains AI-generated descriptions of all images, charts, tables, "
-    text_content += "diagrams, and flowcharts found in the policy document. These descriptions enable "
-    text_content += "searching for visual content.\n\n"
+    text_content += "diagrams, and flowcharts found in the policy document.\n\n"
     
     for desc in image_descriptions:
         text_content += f"--- Page {desc['page_num']}, Image {desc['image_index']} ---\n"
@@ -200,7 +196,7 @@ def create_image_description_file(image_descriptions):
     return text_content.encode('utf-8')
 
 
-# --- 4. AUTOMATIC SESSION CLEANUP LOGIC ---
+# --- 4. AUTOMATIC SESSION CLEANUP ---
 def auto_cleanup_callback(session_id_to_clean):
     try:
         s3 = boto3.client('s3', 
@@ -235,11 +231,9 @@ For example, documents like SNAP, Medicaid, Health Insurance, Housing, and Immig
 
 with st.expander("📖 How to use this assistant"):
     st.markdown("""
-    1. **Step 1: Upload** – Go to the sidebar on the left and drag in a policy PDF.
-    2. **Step 2: Processing** – The system will automatically extract and analyze all images in the document using AWS Bedrock.
-    3. **Step 3: Sync** – Click **'Upload & Sync'**. This allows the Assistant to read and learn the new information.
-    4. **Step 4: Wait** – Watch the status bar. Once it says **'Ready'**, you can begin.
-    5. **Step 5: Ask** – Type your question in the chat box at the bottom, including questions about charts, tables, and diagrams!
+    1. Upload a policy PDF in the sidebar
+    2. Click **'Upload & Sync'** and wait for the "Ready" message
+    3. Ask your questions in the chat below
     """)
 
 # --- 6. SIDEBAR: Manage Documents ---
@@ -247,10 +241,10 @@ with st.sidebar:
     st.header("Manage Documents")
     st.write("Upload a new policy document below to update the Assistant's knowledge.")
     
-    # Add toggle for image processing
     enable_image_processing = st.checkbox(
         "Enable Image Analysis (recommended for documents with charts/diagrams)",
-        value=True,
+        value=PYMUPDF_AVAILABLE and BEDROCK_RUNTIME_AVAILABLE,
+        disabled=not (PYMUPDF_AVAILABLE and BEDROCK_RUNTIME_AVAILABLE),
         help="When enabled, the system will extract and analyze all images using AI vision"
     )
     
@@ -258,32 +252,24 @@ with st.sidebar:
     
     if st.button("Upload & Sync"):
         if uploaded_file:
-            # Read the uploaded file
             pdf_bytes = uploaded_file.read()
-            uploaded_file.seek(0)  # Reset file pointer
+            uploaded_file.seek(0)
             
             file_key = f"{st.session_state.session_id}_{uploaded_file.name}"
             s3_path = f"input-docs/{file_key}"
             metadata_path = f"{s3_path}.metadata.json"
             
             try:
-                image_descriptions = []
-                
-                # Step 1: Extract and describe images (if enabled)
-                if enable_image_processing:
-                    with st.spinner("🔍 Extracting images from PDF..."):
+                # Single spinner for entire process
+                with st.spinner("Processing document..."):
+                    image_descriptions = []
+                    
+                    # Extract and describe images (silent)
+                    if enable_image_processing:
                         images = extract_images_from_pdf(pdf_bytes)
                         
                         if images:
-                            st.info(f"Found {len(images)} images in the document")
-                            
-                            # Step 2: Describe images with Bedrock Claude Vision
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
-                            
-                            for idx, img_data in enumerate(images):
-                                status_text.text(f"🤖 Analyzing image {idx + 1} of {len(images)} (Page {img_data['page_num']})...")
-                                
+                            for img_data in images:
                                 description = describe_image_with_bedrock(
                                     img_data["image_bytes"],
                                     img_data["image_format"],
@@ -295,60 +281,42 @@ with st.sidebar:
                                     "image_index": img_data["image_index"],
                                     "description": description
                                 })
-                                
-                                progress_bar.progress((idx + 1) / len(images))
-                            
-                            status_text.empty()
-                            progress_bar.empty()
-                            st.success(f"✅ Successfully analyzed {len(images)} images using AWS Bedrock")
-                        else:
-                            st.info("No significant images found in this document")
-                
-                # Step 3: Create companion text file with image descriptions
-                if image_descriptions:
-                    with st.spinner("📝 Creating searchable image descriptions..."):
+                    
+                    # Create description file (silent)
+                    if image_descriptions:
                         description_text = create_image_description_file(image_descriptions)
                         description_file_key = f"{st.session_state.session_id}_{uploaded_file.name}_image_descriptions.txt"
                         description_s3_path = f"input-docs/{description_file_key}"
                         
-                        # Upload companion text file
                         s3_client.put_object(
                             Bucket=S3_BUCKET,
                             Key=description_s3_path,
-                            Body=description_text,
-                            Metadata={
-                                'session_id': st.session_state.session_id,
-                                'source_document': uploaded_file.name,
-                                'image_count': str(len(image_descriptions))
-                            }
+                            Body=description_text
                         )
                         
-                        # Also add metadata file for the description file
                         desc_metadata_path = f"{description_s3_path}.metadata.json"
                         s3_client.put_object(
                             Bucket=S3_BUCKET, 
                             Key=desc_metadata_path, 
                             Body=json.dumps({"metadataAttributes": {"session_id": st.session_state.session_id}})
                         )
-                
-                # Step 4: Upload original PDF
-                with st.spinner("📤 Uploading document to cloud..."):
+                    
+                    # Upload PDF (silent)
                     s3_client.upload_fileobj(io.BytesIO(pdf_bytes), S3_BUCKET, s3_path)
                     s3_client.put_object(
                         Bucket=S3_BUCKET, 
                         Key=metadata_path, 
                         Body=json.dumps({"metadataAttributes": {"session_id": st.session_state.session_id}})
                     )
-                    st.success(f"✅ Uploaded {uploaded_file.name}")
-                
-                # Step 5: Start ingestion job
-                with st.spinner("🔄 Assistant is indexing the document and image descriptions..."):
+                    
+                    # Start ingestion (silent)
                     job = bedrock_agent.start_ingestion_job(
                         knowledgeBaseId=KNOWLEDGE_BASE_ID, 
                         dataSourceId=DATA_SOURCE_ID
                     )
                     job_id = job['ingestionJob']['ingestionJobId']
                     
+                    # Wait for completion (silent)
                     while True:
                         status = bedrock_agent.get_ingestion_job(
                             knowledgeBaseId=KNOWLEDGE_BASE_ID, 
@@ -357,22 +325,15 @@ with st.sidebar:
                         )['ingestionJob']['status']
                         
                         if status == 'COMPLETE':
-                            success_msg = "✅ Ready! You can now ask questions about this document"
-                            if image_descriptions:
-                                success_msg += f" and its {len(image_descriptions)} analyzed images."
-                            else:
-                                success_msg += "."
-                            st.success(success_msg)
+                            st.success("✅ Ready! You can now ask questions about this document.")
                             break
                         elif status == 'FAILED':
-                            st.error("❌ The Assistant failed to read the document.")
+                            st.error("❌ Upload failed. Please try again.")
                             break
                         time.sleep(5)
                         
             except Exception as e:
                 st.error(f"Error: {e}")
-                import traceback
-                st.error(traceback.format_exc())
         else:
             st.error("Please select a PDF file first.")
 
@@ -421,10 +382,14 @@ if prompt := st.chat_input("Ask a question about policy..."):
                             # Escape HTML to prevent markdown interpretation
                             escaped_text = html.escape(source_text)
                             
+                            # Check if this chunk is from image descriptions
+                            is_image_desc = "IMAGE DESCRIPTION" in source_text or "--- Page" in source_text
+                            chunk_icon = "📸" if is_image_desc else "📄"
+                            
                             # Display using HTML with fixed small font size
                             st.markdown(f"""
                                 <div class="chunk-container">
-                                    <div class="chunk-header">Source Chunk {chunk_count}:</div>
+                                    <div class="chunk-header">Source Chunk {chunk_count} {chunk_icon}</div>
                                     <div class="chunk-content">{escaped_text}</div>
                                 </div>
                             """, unsafe_allow_html=True)
