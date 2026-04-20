@@ -2,6 +2,8 @@
 
 **Policy-QA Assistant** is a Retrieval-Augmented Generation (RAG) application that democratizes access to complex government policy manuals (like SNAP and Medicaid). By combining the power of **Amazon Bedrock** with a user-friendly **Streamlit** interface, this tool allows users to upload dense policy documents and get instant, accurate answers in plain English.
 
+You can access Assistant through this link
+https://policy-app-assistant.streamlit.app/
 ---
 
 ## 🚀 Features
