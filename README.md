@@ -15,9 +15,6 @@ https://policy-app-assistant.streamlit.app/
 ---
 
 ## 🏗️ Technical Architecture
-
-
-
 1. **Frontend**: Streamlit (Python)
 2. **Orchestration**: Amazon Bedrock Knowledge Bases
 3. **Data Storage**: Amazon S3 (PDFs) and Amazon OpenSearch Serverless (Vector Embeddings)
